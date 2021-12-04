@@ -26,7 +26,7 @@
                                lines)
                        least fallback (+ n 1))]))
 
-(define input (open-input-file "inputs/03"))
+(define input (open-input-file "input"))
 (define lines (port->lines input))
 
 (define oxy (string->number (bit-criteria lines #f) 2))

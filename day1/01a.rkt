@@ -1,7 +1,7 @@
 #lang racket
 (require threading)
 
-(define input (file->lines "inputs/01"))
+(define input (file->lines "input"))
 
 (define (map-differing-lengths f . arrs)
   (define minLength (apply min (map length arrs)))

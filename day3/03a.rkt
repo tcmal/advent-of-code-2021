@@ -15,7 +15,7 @@
   (cond [(string=? x "0") "1"]
         [else "0"]))
 
-(define input (open-input-file "inputs/03"))
+(define input (open-input-file "input"))
 (define bit-positions
   (transpose (map (lambda (xs)
                     (map (curry make-string 1) (string->list xs)))
