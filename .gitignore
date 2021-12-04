@@ -21,3 +21,6 @@ compiled/
 *.dep
 
 # End of https://www.toptal.com/developers/gitignore/api/racket
+
+*/input
+*/input_test
