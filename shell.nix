@@ -3,6 +3,8 @@
 pkgs.mkShell {
   buildInputs = with pkgs; [
   		emacs
-		racket
+      racket
+      clojure
+      leiningen
 	];
 }
