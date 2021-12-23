@@ -1,27 +1,28 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
 import Data.Monoid (Endo (Endo), appEndo)
-import Data.Maybe (isJust)
+import Data.Maybe (listToMaybe, isJust)
 import Data.List (isPrefixOf)
-import Linear.Vector ((^+^))
-import Linear.V3 (V3 (V3), cross)
-import Linear.Matrix ((!*))
+import Linear.Vector ((^+^), (^-^))
+import Linear.V3 (V3 (V3))
+
 import Data.Set (Set)
-import Data.List (find)
-import Control.Applicative ((<|>))
+
 import qualified Data.Set as S
 import qualified Data.Map as M
 import qualified Data.Text as T
 
 type Vec3 = V3 Integer
-type Coords = [Vec3]
-type CoordsWithOffset = (Coords, Vec3)
 type Transform = Endo Vec3
+data Scanner = Scanner { beacons :: [Vec3]
+                       } deriving (Show, Eq)
+data PositionedScanner = PositionedScanner { scanner :: Scanner
+                                            ,originOffset :: Vec3
+                                           } deriving (Show)
 
 instance Show Transform where
   show c = show $ appEndo c (V3 0 0 0)
@@ -38,34 +39,15 @@ rotations = [a <> b | a <- ras, b <- rbs]
               , rotZ, rotZ <> rotZ <> rotZ]
         rbs = [nullTrans, rotX, rotX <> rotX, rotX <> rotX <> rotX]
 
-firstJust :: [Maybe a] -> Maybe a
-firstJust ms | null js = Nothing
-             | otherwise = head js
-  where js = filter isJust ms
-
 threshold :: Integer
 threshold = 12
 
-attemptFindOffset :: Coords -> Coords -> Maybe Vec3
-attemptFindOffset base other = (find ((>= threshold) . snd) offsetCounts) >>= (Just . fst)
-  where allOffsets = zipWith (-) base other
-        offsetCounts = M.toList $ M.fromListWith (+) [(x, 1) | x <- allOffsets]
+firstJust :: [Maybe a] -> Maybe a
+firstJust xs | null js = Nothing
+             | otherwise = (head js)
+  where js = filter isJust xs
 
-attemptFindOffsetFrom :: [CoordsWithOffset] -> Coords -> Maybe (Vec3, Coords)
-attemptFindOffsetFrom [] v = Nothing
-attemptFindOffsetFrom ((base, baseOff):cs) ds = (firstJust foundFromOriented) <|> attemptFindOffsetFrom cs ds
-  where absoluteOffset offset = baseOff + offset
-        orientedDs = [map (appEndo o) ds | o <- rotations]
-        foundFromOriented = [(absoluteOffset <$> attemptFindOffset base d) >>= (Just . (, d)) | d <- orientedDs]
-
-discoverMoreOffsets :: [CoordsWithOffset] -> [Coords] -> ([CoordsWithOffset], [Coords])
-discoverMoreOffsets [] (c:cs) = ([(c, V3 0 0 0)], cs)
-discoverMoreOffsets discovered cs = (discovered', undiscovered)
-  where discoverAttempts = zip cs (map (attemptFindOffsetFrom discovered) cs)
-        discovered' = discovered ++ [(d', off) | (_, Just (off, d')) <- discoverAttempts]
-        undiscovered = [a | (a, Nothing) <- discoverAttempts]
-
-parseFile :: String -> [Coords]
+parseFile :: String -> [[Vec3]]
 parseFile s = reverse $ parseLines (tail $ lines s) [[]]
   where parseLines [] cs = cs
         parseLines (l:ls) (c:cs) | "---" `isPrefixOf` l = parseLines ls ([] : c : cs)
@@ -74,15 +56,53 @@ parseFile s = reverse $ parseLines (tail $ lines s) [[]]
         parseLine l = V3 x y z
           where [x, y, z] = map (read . T.unpack) $ T.splitOn "," $ T.pack l
 
-repeatedApply :: Eq a => Eq b => (a -> b -> (a, b)) -> a -> b -> (a, b)
-repeatedApply f a b | (a', b') == (a, b) = (a', b')
-                    | otherwise          = repeatedApply f a' b'
-  where (a', b') = f a b
+commonOffset :: [Vec3] -> [Vec3] -> Maybe Vec3
+commonOffset ys xs = listToMaybe aboveThreshold >>= (Just . fst)
+  where dists = [x ^-^ y | x <- xs, y <- ys]
+        distCounts = M.toList $ M.fromListWith (+) [(d, 1) | d <- dists]
+        aboveThreshold = filter ((>= threshold) . snd) distCounts
+
+applyTransform :: Transform -> Scanner -> Scanner
+applyTransform t (Scanner bs) = Scanner (map (appEndo t) bs)
+
+-- attempt to get a's offset from b
+offsetFrom :: Scanner -> Scanner -> Maybe (Vec3, Scanner)
+offsetFrom a b = listToMaybe successes
+  where attempts = [attemptWith rot | rot <- rotations]
+        successes = [(a, b) | (Just a, b) <- attempts]
+        attemptWith rot = (commonOffset (beacons a') (beacons b), a')
+          where a' = applyTransform rot a
+
+adjustedOffsetFrom :: PositionedScanner -> Scanner -> Maybe PositionedScanner
+adjustedOffsetFrom b a = case a `offsetFrom` (scanner b) of
+                           Just (off, sc) -> Just $ PositionedScanner sc (off ^+^ (originOffset b))
+                           Nothing        -> Nothing
+
+solveMore :: [PositionedScanner] -> [Scanner] -> ([PositionedScanner], [Scanner])
+solveMore ks us = foldr solveOne (ks, us) us
+  where solveOne s (ks', us') = case firstJust (map (\k -> adjustedOffsetFrom k s) ks') of
+                                  Just d -> (d : ks', filter (/= s) us')
+                                  Nothing -> (ks', us')
+
+calcAllOffsets :: [Scanner] -> [PositionedScanner]
+calcAllOffsets (s:ss) = keepSolvingMore ([PositionedScanner s (V3 0 0 0)], ss)
+  where keepSolvingMore (ks,[]) = ks
+        keepSolvingMore (ks,us) = keepSolvingMore (solveMore ks us)
+
+absoluteBeacons :: PositionedScanner -> Set Vec3
+absoluteBeacons (PositionedScanner sc pos) = S.fromList $ map (pos ^+^) (beacons sc)
+
+manhattan :: Vec3 -> Vec3 -> Integer
+manhattan (V3 x y z) (V3 x' y' z') = (abs (x' -x)) + (abs (y' - y)) + (abs (z' - z))
 
 main :: IO ()
 main = do
-  input <- readFile "./input_test"
-  let parsed = parseFile input
-  let (offsets, remaining) = repeatedApply discoverMoreOffsets [] parsed
-  print (length remaining)
-  print $ map snd offsets
+  input <- readFile "./input"
+  let parsed = map Scanner $ parseFile input
+  let positioned = calcAllOffsets parsed
+  let beacons = foldr S.union S.empty $ map absoluteBeacons positioned
+
+  print $ "Part 1: " ++ (show $ S.size beacons)
+
+  let scannerPositions = map originOffset positioned
+  print $ "Part 2: " ++ (show $ maximum [manhattan a b | a <- scannerPositions, b <- scannerPositions])

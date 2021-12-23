@@ -3,7 +3,9 @@
 pkgs.mkShell {
   buildInputs = with pkgs; [
   		emacs
-	ghc
+	    (haskellPackages.ghcWithPackages (p: [
+          p.linear
+      ]))
       racket
       clojure
       leiningen
