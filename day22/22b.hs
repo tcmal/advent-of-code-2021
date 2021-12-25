@@ -76,11 +76,6 @@ performCommand cs (Command val c) | val = (ChargedCuboid val c) : (cs ++ overlap
   where overlaps = filter (not . cEmpty . cuboid) $ map invertedIntersection cs
         invertedIntersection cc = ChargedCuboid (not (charge cc)) ((cuboid cc) `cIntersection` c)
 
-threshold = 50
-
-interestedCuboid :: Cuboid
-interestedCuboid = Cuboid ((-threshold), (-threshold), (-threshold)) (threshold, threshold, threshold)
-
 nullCuboid :: Cuboid
 nullCuboid = Cuboid (0, 0, 0) ((-1), (-1), (-1))
 
@@ -90,20 +85,9 @@ map3 f (a, b, c) = (f a, f b, f c)
 zip3t :: (a, a, a) -> (b, b, b) -> ((a, b), (a, b), (a, b))
 zip3t (x, y, z) (x', y', z') = ((x, x'), (y, y'), (z, z'))
 
-cClamp :: Cuboid -> Cuboid
-cClamp (Cuboid ss es) = Cuboid (sx', sy', sz') (ex', ey', ez')
-  where (sx', sy', sz') = map3 (max (-threshold)) ss
-        (ex', ey', ez') = map3 (min threshold) es
-
-minifyCommand :: Command -> Command
-minifyCommand (Command v cb) | cEmpty clamped = Command False nullCuboid
-                             | otherwise       = Command v (cClamp cb)
-  where clamped = cClamp cb
-
 main = do
   input <- readFile "./input"
-  let (Right parsed) = parse parseFile "input" input
-  let cmds = map minifyCommand parsed
+  let (Right cmds) = parse parseFile "input" input
 
   let cs = foldl performCommand [] cmds
   let vol = foldr (+) 0 $ map ccVolume cs
