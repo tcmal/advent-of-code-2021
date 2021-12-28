@@ -13,7 +13,6 @@ author:         Author name here
 maintainer:     example@example.com
 copyright:      2021 Author name here
 license:        BSD3
-license-file:   LICENSE
 build-type:     Simple
 extra-source-files:
     README.md
@@ -34,6 +33,7 @@ library
       base >=4.7 && <5
     , containers
     , search-algorithms
+    , text
   default-language: Haskell2010
 
 executable day23-exe
@@ -48,4 +48,5 @@ executable day23-exe
     , containers
     , day23
     , search-algorithms
+    , text
   default-language: Haskell2010

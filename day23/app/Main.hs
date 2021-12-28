@@ -1,9 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TupleSections #-}
 module Main where
 
 import Algorithm.Search (dijkstraAssoc)
+import qualified Data.Text as T
 import Data.Maybe (listToMaybe, catMaybes)
-import Data.List (intercalate)
+import Data.List (intercalate, transpose)
 import Data.Char (isLetter)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -11,8 +13,7 @@ import Data.Set (Set)
 import qualified Data.Set as S
 
 data Species = Am | Br | Co | De deriving (Show, Eq, Ord)
-data YCoord = Hallway | RoomT | RoomB deriving (Show, Eq, Ord)
-type Coord = (Int, YCoord)
+type Coord = (Int, Int)
 type Board = Map Coord Species
 
 toSpecies :: Char -> Species
@@ -42,40 +43,37 @@ isRoomX _ = False
 
 lowerBound = (-1)
 upperBound = 9
+lowestY = 4
 
 inBounds :: Coord -> Bool
 inBounds (x, _) = x >= lowerBound && x <= upperBound
 
 parseFile :: String -> Board
 parseFile s = foldl insertRoom M.empty rooms
-  where letters = map toSpecies $ filter isLetter s
-        roomContents = zip letters (drop 4 letters)
-        rooms = zip [Am, Br, Co, De] roomContents
-        insertRoom m (s, (rt, rb)) = (M.fromList [((roomX s, RoomT), rt), ((roomX s, RoomB), rb)]) `M.union` m
+  where letters = transpose $ map (map toSpecies . filter isLetter . T.unpack) $ T.splitOn "\n" (T.pack s)
+        rooms = zip [Am, Br, Co, De] letters
+        insertRoom m (s, cs) = (M.fromList [((roomX s, y), c) | (y, c) <- zip [1..] cs]) `M.union` m
 
 topOfRoom :: Board -> Int -> Maybe Coord
-topOfRoom b x = listToMaybe $ filter (`M.member` b) [c1, c2]
-  where c1 = (x, RoomT)
-        c2 = (x, RoomB)
+topOfRoom b x = listToMaybe $ filter (`M.member` b) [(x, y) | y <- [1..lowestY]]
 
 availableHallwaySpaces :: Board -> Int -> [Coord]
 availableHallwaySpaces b sx = (exploreWith (+ 1) sx) ++ (exploreWith (+ (-1)) (sx - 1))
   where exploreWith f x | isRoomX x = exploreWith f (f x)
-                        | not (inBounds (x, Hallway)) = []
-                        | (x, Hallway) `M.member` b = []
-                        | otherwise = (x, Hallway) : exploreWith f (f x)
+                        | not (inBounds (x, 0)) = []
+                        | (x, 0) `M.member` b = []
+                        | otherwise = (x, 0) : exploreWith f (f x)
 
 pathToRoom :: Coord -> Species -> [Coord]
-pathToRoom (sx, _) es | sx <= ex  = map (, Hallway) [sx + 1..ex]
-                      | otherwise = map (, Hallway) [ex..sx - 1]
+pathToRoom (sx, _) es | sx <= ex  = map (, 0) [sx + 1..ex]
+                      | otherwise = map (, 0) [ex..sx - 1]
   where ex = roomX es
 
 pathClear :: Board -> [Coord] -> Bool
 pathClear b path = all (`M.notMember` b) path
 
-toTopOfRoom :: YCoord -> Int
-toTopOfRoom RoomT = 0
-toTopOfRoom RoomB = 1
+toTopOfRoom :: Int -> Int
+toTopOfRoom x = x - 1
 
 movingFromRoom :: Board -> Species -> [(Board, Int)]
 movingFromRoom b s = case topOfRoom b (roomX s) of
@@ -85,20 +83,21 @@ movingFromRoom b s = case topOfRoom b (roomX s) of
                                           in [(M.insert c movingOut withoutTop, (abs ((fst c) - x) + 1 + extraCost) * cost movingOut) | c <- availableHallwaySpaces b x]
                        Nothing -> []
 
-roomPositions = [RoomT, RoomB]
+roomPositions = [1..lowestY]
 
 movingIntoRoom :: Board -> [(Board, Int)]
-movingIntoRoom b = concatMap attemptMoveToRoom [((c, Hallway), (c, Hallway) `M.lookup` b) | c <- [lowerBound..upperBound]]
+movingIntoRoom b = concatMap attemptMoveToRoom [((c, 0), (c, 0) `M.lookup` b) | c <- [lowerBound..upperBound]]
   where attemptMoveToRoom (_, Nothing)  = []
         attemptMoveToRoom (c, Just s) | not clear = []
                                       | otherwise = [(b', (length p + 1 + extraCost) * (cost s))]
           where p = pathToRoom c s
-                clear = roomClear && pathClear b p
-                roomClear = ((roomX s, RoomT) `M.notMember` b) || ((roomX s, RoomB) `M.notMember` b)
-                roomCorrect = all (== s) $ catMaybes [(roomX s, rp) `M.lookup` b | rp <- roomPositions]
-                goToBottom = (roomX s, RoomB) `M.notMember` b
-                extraCost = if goToBottom then 1 else 0
-                c' = (roomX s, if goToBottom then RoomB else RoomT)
+                clear = pathClear b p && hasSpace && isCorrect
+                occupants = catMaybes [(roomX s, y) `M.lookup` b | y <- roomPositions]
+                hasSpace = length occupants < lowestY
+                isCorrect = all (== s) occupants
+                y' = lowestY - (length occupants)
+                extraCost = toTopOfRoom y'
+                c' = (roomX s, y')
                 b' = M.insert c' s $ M.delete c b
 
 species = [Am, Br, Co, De]
@@ -107,22 +106,19 @@ nextMoves :: Board -> [(Board, Int)]
 nextMoves b = (concatMap (movingFromRoom b) species) ++ movingIntoRoom b
 
 isFinished :: Board -> Bool
-isFinished b = all id [(M.lookup (roomX s, rp) b) == Just s | s <- species, rp <- [RoomT, RoomB]]
+isFinished b = all id [(M.lookup (roomX s, rp) b) == Just s | s <- species, rp <- roomPositions]
 
 solve :: Board -> Maybe (Int, [Board])
 solve = dijkstraAssoc nextMoves isFinished
 
 printBoard :: Board -> String
-printBoard b = intercalate "\n" [printLine l | l <- [Hallway, RoomT, RoomB]]
+printBoard b = intercalate "\n" [printLine l | l <- [0..lowestY]]
   where printLine l = [toChar ((x, l) `M.lookup` b) | x <- [lowerBound..upperBound]]
         toChar Nothing = ' '
         toChar (Just Am) = 'A'
         toChar (Just Br) = 'B'
         toChar (Just Co) = 'C'
         toChar (Just De) = 'D'
-
-exampleInput :: Board
-exampleInput = M.fromList [((0, Hallway), Am), ((1, RoomT), Br), ((1, RoomB), Am), ((2, Hallway), Br), ((4, Hallway), De)]
 
 printNexts :: [(Board, Int)] -> IO [()]
 printNexts = sequence . map printNext
@@ -136,8 +132,6 @@ main :: IO ()
 main = do
   input <- readFile "./input"
   let parsed = parseFile input
-  -- putStrLn $ printBoard parsed
-  -- putStrLn $ intercalate "\n---\n" $ map (printBoard . fst) $ nextMoves $ fst ((nextMoves parsed)!!0)
   let Just (cost, path) = solve parsed
   putStrLn $ intercalate "\n---\n" $ map printBoard path
   print path
